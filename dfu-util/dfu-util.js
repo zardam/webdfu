@@ -225,13 +225,16 @@ var device = null;
         let infoDisplay = document.querySelector("#usbInfo");
         let dfuDisplay = document.querySelector("#dfuInfo");
         let vidField = document.querySelector("#vid");
+        let pidField = document.querySelector("#pid");
         let interfaceDialog = document.querySelector("#interfaceDialog");
         let interfaceForm = document.querySelector("#interfaceForm");
         let interfaceSelectButton = document.querySelector("#selectInterface");
 
         let searchParams = new URLSearchParams(window.location.search);
-        let fromLandingPage = false;
+        let doAutoConnect = false;
         let vid = 0;
+        let pid = 0;
+
         // Set the vendor ID from the landing page URL
         if (searchParams.has("vid")) {
             const vidString = searchParams.get("vid");
@@ -242,10 +245,32 @@ var device = null;
                     vid = parseInt(vidString, 10);
                 }
                 vidField.value = "0x" + hex4(vid).toUpperCase();
-                fromLandingPage = true;
+                doAutoConnect = true;
             } catch (error) {
                 console.log("Bad VID " + vidString + ":" + error);
             }
+        } else {
+            // NumWorks specialization
+            vid = 0x0483; // ST
+        }
+
+        // Set the product ID from the landing page URL
+        if (searchParams.has("pid")) {
+            const pidString = searchParams.get("pid");
+            try {
+                if (pidString.toLowerCase().startsWith("0x")) {
+                    pid = parseInt(pidString, 16);
+                } else {
+                    pid = parseInt(pidString, 10);
+                }
+                pidField.value = "0x" + hex4(pid).toUpperCase();
+                doAutoConnect = true;
+            } catch (error) {
+                console.log("Bad PID " + pidString + ":" + error);
+            }
+        } else {
+            // NumWorks specialization
+            pid = 0xDF11; // STM Device in DFU Mode
         }
 
         // Grab the serial number from the landing page
@@ -256,7 +281,12 @@ var device = null;
             if (window.location.search.endsWith("/") && serial.endsWith("/")) {
                 serial = serial.substring(0, serial.length-1);
             }
-            fromLandingPage = true;
+            doAutoConnect = true;
+        }
+
+        const isNumWorks = (vid === 0x0484 && pid === 0xDF11);
+        if (isNumWorks) {
+            doAutoConnect = true;
         }
 
         let configForm = document.querySelector("#configForm");
@@ -335,7 +365,7 @@ var device = null;
                         dfuseUploadSizeField.disabled = true;
                     }
                     if (!desc.CanDnload) {
-                        dnloadButton.disabled = true;
+                        downloadButton.disabled = true;
                     }
                 }
 
@@ -430,7 +460,7 @@ var device = null;
             return device;
         }
 
-        function autoConnect(vid, serial) {
+        function autoConnect(vid, pid, serial) {
             dfu.findAllDfuInterfaces().then(
                 async dfu_devices => {
                     let matching_devices = [];
@@ -439,15 +469,22 @@ var device = null;
                             if (dfu_device.device_.serialNumber == serial) {
                                 matching_devices.push(dfu_device);
                             }
-                        } else if (dfu_device.device_.vendorId == vid) {
-                            matching_devices.push(dfu_device);
+                        } else {
+                            if (
+                                (!pid && vid > 0 && dfu_device.device_.vendorId  == vid) ||
+                                (!vid && pid > 0 && dfu_device.device_.productId == pid) ||
+                                (vid > 0 && pid > 0 && dfu_device.device_.vendorId  == vid && dfu_device.device_.productId == pid)
+                               )
+                            {
+                                matching_devices.push(dfu_device);
+                            }
                         }
                     }
 
                     if (matching_devices.length == 0) {
                         statusDisplay.textContent = 'No device found.';
                     } else {
-                        if (matching_devices.length == 1) {
+                        if (matching_devices.length == 1 || isNumWorks) { // For NumWorks, we want interface 0 ("Internal Flash")
                             statusDisplay.textContent = 'Connecting...';
                             device = matching_devices[0];
                             console.log(device);
@@ -496,8 +533,13 @@ var device = null;
                 let filters = [];
                 if (serial) {
                     filters.push({ 'serialNumber': serial });
-                } else if (vid) {
-                    filters.push({ 'vendorId': vid });
+                } else {
+                    if (vid) {
+                        filters.push({'vendorId': vid});
+                    }
+                    if (vid && pid) {
+                        filters.push({'productId': pid, 'vendorId': vid});
+                    }
                 }
                 navigator.usb.requestDevice({ 'filters': filters }).then(
                     async selectedDevice => {
@@ -505,7 +547,7 @@ var device = null;
                         if (interfaces.length == 0) {
                             console.log(selectedDevice);
                             statusDisplay.textContent = "The selected device does not have any USB DFU interfaces.";
-                        } else if (interfaces.length == 1) {
+                        } else if (interfaces.length == 1 || isNumWorks) { // For NumWorks, we want interface 0 ("Internal Flash")
                             await fixInterfaceNames(selectedDevice, interfaces);
                             device = await connect(new dfu.Device(selectedDevice, interfaces[0]));
                         } else {
@@ -665,8 +707,8 @@ var device = null;
         if (typeof navigator.usb !== 'undefined') {
             navigator.usb.addEventListener("disconnect", onUnexpectedDisconnect);
             // Try connecting automatically
-            if (fromLandingPage) {
-                autoConnect(vid, serial);
+            if (doAutoConnect) {
+                autoConnect(vid, pid, serial);
             }
         } else {
             statusDisplay.textContent = 'WebUSB not available.'
