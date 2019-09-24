@@ -219,7 +219,7 @@ var dfuse = {};
         }
 
         this.logInfo("Erasing DFU device memory");
-        
+
         let bytes_sent = 0;
         let expected_size = data.byteLength;
 
@@ -263,18 +263,20 @@ var dfuse = {};
         }
         this.logInfo(`Wrote ${bytes_sent} bytes`);
 
-        this.logInfo("Manifesting new firmware");
-        try {
-            await this.dfuseCommand(dfuse.SET_ADDRESS, startAddress, 4);
-            await this.download(new ArrayBuffer(), 0);
-        } catch (error) {
-            throw "Error during DfuSe manifestation: " + error;
-        }
+        if(manifestationTolerant) {
+          this.logInfo("Manifesting new firmware");
+          try {
+              await this.dfuseCommand(dfuse.SET_ADDRESS, startAddress, 4);
+              await this.download(new ArrayBuffer(), 2);
+          } catch (error) {
+              throw "Error during DfuSe manifestation: " + error;
+          }
 
-        try {
-            await this.poll_until(state => (state == dfu.dfuMANIFEST));
-        } catch (error) {
-            this.logError(error);
+          try {
+              await this.poll_until(state => (state == dfu.dfuMANIFEST));
+          } catch (error) {
+              this.logError(error);
+          }
         }
     }
 

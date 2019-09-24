@@ -62,22 +62,25 @@
           <label for="dfuseUploadSize">DfuSe Upload Size:</label>
           <input type="number" name="dfuseUploadSize" id="dfuseUploadSize" min="1"/>
         </div>
-      
+
         <legend style="display: none;">DFU mode</legend>
         <fieldset>
           <legend>Flash firmware onto device</legend>
+          <p>External memory, if available, should be flashed first.</p>
           <p>
             <input type="file" id="firmwareFile" name="file" disabled="true"/>
           </p>
           <p>
-            <button id="download" disabled="true">Flash</button>
+            <button id="download_internal" disabled="true">Flash internal</button>
+            <button id="download_external" disabled="true">Flash external</button>
           </p>
           <div class="log" id="downloadLog"></div>
         </fieldset>
         <fieldset>
           <legend>Dump flash from device</legend>
           <p>
-            <button id="upload" disabled="true">Dump</button>
+            <button id="upload_internal" disabled="true">Dump internal</button>
+            <button id="upload_external" disabled="true">Dump external</button>
           </p>
           <div class="log" id="uploadLog"></div>
         </fieldset>

@@ -219,8 +219,10 @@ var device = null;
     document.addEventListener('DOMContentLoaded', event => {
         let connectButton = document.querySelector("#connect");
         let detachButton = document.querySelector("#detach");
-        let downloadButton = document.querySelector("#download");
-        let uploadButton = document.querySelector("#upload");
+        let downloadInternalButton = document.querySelector("#download_internal");
+        let downloadExternalButton = document.querySelector("#download_external");
+        let uploadInternalButton = document.querySelector("#upload_internal");
+        let uploadExternalButton = document.querySelector("#upload_external");
         let statusDisplay = document.querySelector("#status");
         let infoDisplay = document.querySelector("#usbInfo");
         let dfuDisplay = document.querySelector("#dfuInfo");
@@ -316,8 +318,10 @@ var device = null;
             infoDisplay.textContent = "";
             dfuDisplay.textContent = "";
             detachButton.disabled = true;
-            uploadButton.disabled = true;
-            downloadButton.disabled = true;
+            uploadInternalButton.disabled = true;
+            uploadExternalButton.disabled = true;
+            downloadInternalButton.disabled = true;
+            downloadExternalButton.disabled = true;
             firmwareFileField.disabled = true;
         }
 
@@ -361,15 +365,17 @@ var device = null;
 
                 if (device.settings.alternate.interfaceProtocol == 0x02) {
                     if (!desc.CanUpload) {
-                        uploadButton.disabled = true;
+                        uploadInternalButton.disabled = true;
+                        uploadExternalButton.disabled = true;
                         dfuseUploadSizeField.disabled = true;
                     }
                     if (!desc.CanDnload) {
-                        downloadButton.disabled = true;
+                        downloadInternalButton.disabled = true;
+                        downloadExternalButton.disabled = true;
                     }
                 }
 
-                if (desc.DFUVersion == 0x011a && device.settings.alternate.interfaceProtocol == 0x02) {
+                if ((desc.DFUVersion == 0x100 || desc.DFUVersion == 0x011a) && device.settings.alternate.interfaceProtocol == 0x02) {
                     device = new dfuse.Device(device.device_, device.settings);
                     if (device.memoryInfo) {
                         let totalSize = 0;
@@ -398,7 +404,7 @@ var device = null;
                     }
                 }
             }
-            
+
             // Bind logging methods
             device.logDebug = logDebug;
             device.logInfo = logInfo;
@@ -426,14 +432,18 @@ var device = null;
             if (device.settings.alternate.interfaceProtocol == 0x01) {
                 // Runtime
                 detachButton.disabled = false;
-                uploadButton.disabled = true;
-                downloadButton.disabled = true;
+                uploadInternalButton.disabled = true;
+                uploadExternalButton.disabled = true;
+                downloadInternalButton.disabled = true;
+                downloadExternalButton.disabled = true;
                 firmwareFileField.disabled = true;
             } else {
                 // DFU
                 detachButton.disabled = true;
-                uploadButton.disabled = false;
-                downloadButton.disabled = false;
+                uploadInternalButton.disabled = false;
+                uploadExternalButton.disabled = false;
+                downloadInternalButton.disabled = false;
+                downloadExternalButton.disabled = false;
                 firmwareFileField.disabled = false;
             }
 
@@ -604,46 +614,59 @@ var device = null;
             }
         });
 
-        uploadButton.addEventListener('click', async function(event) {
-            event.preventDefault();
-            event.stopPropagation();
-            if (!configForm.checkValidity()) {
-                configForm.reportValidity();
-                return false;
-            }
+        function uploadEventListener(uploadFunction) {
+          return async function(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (!configForm.checkValidity()) {
+                  configForm.reportValidity();
+                  return false;
+              }
 
-            if (!device || !device.device_.opened) {
-                onDisconnect();
-                device = null;
-            } else {
-                setLogContext(uploadLog);
-                clearLog(uploadLog);
-                try {
-                    let status = await device.getStatus();
-                    if (status.state == dfu.dfuERROR) {
-                        await device.clearStatus();
-                    }
-                } catch (error) {
-                    device.logWarning("Failed to clear status");
-                }
+              if (!device || !device.device_.opened) {
+                  onDisconnect();
+                  device = null;
+              } else {
+                  setLogContext(uploadLog);
+                  clearLog(uploadLog);
+                  try {
+                      let status = await device.getStatus();
+                      if (status.state == dfu.dfuERROR) {
+                          await device.clearStatus();
+                      }
+                  } catch (error) {
+                      device.logWarning("Failed to clear status");
+                  }
 
-                let maxSize = Infinity;
-                if (!dfuseUploadSizeField.disabled) {
-                    maxSize = parseInt(dfuseUploadSizeField.value);
-                }
+                  let maxSize = Infinity;
+                  if (!dfuseUploadSizeField.disabled) {
+                      maxSize = parseInt(dfuseUploadSizeField.value);
+                  }
 
-                try {
-                    const blob = await device.do_upload(transferSize, maxSize);
-                    saveAs(blob, "firmware.bin");
-                } catch (error) {
-                    logError(error);
-                }
+                  try {
+                      await uploadFunction(maxSize);
+                  } catch (error) {
+                      logError(error);
+                  }
 
-                setLogContext(null);
-            }
+                  setLogContext(null);
+              }
 
-            return false;
-        });
+              return false;
+          }
+        };
+
+        uploadInternalButton.addEventListener('click', uploadEventListener(async function(maxSize) {
+          device.startAddress = 0x08000000;
+          const blob = await device.do_upload(transferSize, maxSize);
+          saveAs(blob, "internal.bin");
+        }));
+
+        uploadExternalButton.addEventListener('click', uploadEventListener(async function(maxSize) {
+          device.startAddress = 0x90000000;
+          const blob = await device.do_upload(transferSize, 8192*1024);
+          saveAs(blob, "external.bin");
+        }));
 
         firmwareFileField.addEventListener("change", function() {
             firmwareFile = null;
@@ -657,51 +680,63 @@ var device = null;
             }
         });
 
-        downloadButton.addEventListener('click', async function(event) {
-            event.preventDefault();
-            event.stopPropagation();
-            if (!configForm.checkValidity()) {
-                configForm.reportValidity();
-                return false;
-            }
-            
-            if (device && firmwareFile != null) {
-                setLogContext(downloadLog);
-                clearLog(downloadLog);
-                try {
-                    let status = await device.getStatus();
-                    if (status.state == dfu.dfuERROR) {
-                        await device.clearStatus();
-                    }
-                } catch (error) {
-                    device.logWarning("Failed to clear status");
-                }
-                await device.do_download(transferSize, firmwareFile, manifestationTolerant).then(
-                    () => {
-                        logInfo("Done!");
-                        setLogContext(null);
-                        if (!manifestationTolerant) {
-                            device.waitDisconnected(5000).then(
-                                dev => {
-                                    onDisconnect();
-                                    device = null;
-                                },
-                                error => {
-                                    // It didn't reset and disconnect for some reason...
-                                    console.log("Device unexpectedly tolerated manifestation.");
-                                }
-                            );
-                        }
-                    },
-                    error => {
-                        logError(error);
-                        setLogContext(null);
-                    }
-                )
-            }
+        function downloadEventListener(downloadFunction) {
+          return async function(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (!configForm.checkValidity()) {
+                  configForm.reportValidity();
+                  return false;
+              }
 
-            //return false;
-        });
+              if (device && firmwareFile != null) {
+                  setLogContext(downloadLog);
+                  clearLog(downloadLog);
+                  try {
+                      let status = await device.getStatus();
+                      if (status.state == dfu.dfuERROR) {
+                          await device.clearStatus();
+                      }
+                  } catch (error) {
+                      device.logWarning("Failed to clear status");
+                  }
+                  await downloadFunction().then(
+                      () => {
+                          logInfo("Done!");
+                          setLogContext(null);
+                          if (!manifestationTolerant) {
+                              device.waitDisconnected(5000).then(
+                                  dev => {
+                                      onDisconnect();
+                                      device = null;
+                                  },
+                                  error => {
+                                      // It didn't reset and disconnect for some reason...
+                                      console.log("Device unexpectedly tolerated manifestation.");
+                                  }
+                              );
+                          }
+                      },
+                      error => {
+                          logError(error);
+                          setLogContext(null);
+                      }
+                  )
+              }
+
+              //return false;
+          }
+        }
+
+        downloadInternalButton.addEventListener('click', downloadEventListener(async function() {
+          device.startAddress = 0x08000000;
+          return device.do_download(transferSize, firmwareFile, true);
+        }));
+
+        downloadExternalButton.addEventListener('click', downloadEventListener(async function() {
+          device.startAddress = 0x90000000;
+          return device.do_download(transferSize, firmwareFile, false);
+        }));
 
         // Check if WebUSB is available
         if (typeof navigator.usb !== 'undefined') {
